@@ -1,0 +1,191 @@
+output_path = "/home/mahmadi/flu_seqs/simulations/"
+primer_path = "/home/mahmadi/flu_seqs/primer.bed"
+
+rule all:
+    input:
+        output_path + "H1N1/",
+        output_path + "H3N2/",
+        output_path + "mapped_reads.bam",
+        output_path + "freyja_mixture_h1n1.txt",         # From mixed reads
+        output_path + "freyja_mixture_h3n2.txt", 
+        output_path + "freyja_h1n1_demix.txt",    # From H1N1-only
+        output_path + "freyja_h3n2_demix.txt"     # From H3N2-only
+
+
+rule bygul1:
+    input:
+        genome="/home/mahmadi/flu_seqs/reference/H1N1.fasta",  # can be either genome index or genome fasta
+        primer=primer_path,
+        reference = "/home/mahmadi/flu_seqs/reference/H1N1.fasta"
+    output:
+        directory(output_path + "H1N1/")
+    conda:
+        "bygul"
+    shell:
+        """bygul simulate-proportions {input.genome} {input.primer} {input.reference} --outdir {output} --read_length 150 --simulator wgsim --readcnt 100"""
+
+rule bygul2:
+    input:
+        genome="/home/mahmadi/flu_seqs/sequences/H3N2_HA.fasta",  # can be either genome index or genome fasta
+        primer=primer_path,
+        reference = "/home/mahmadi/flu_seqs/reference/H3N2.fasta"
+    output:
+        directory(output_path + "H3N2/")
+    conda:
+        "bygul"
+    shell:
+        """bygul simulate-proportions {input.genome} {input.primer} {input.reference} --outdir {output} --read_length 150 --simulator wgsim --readcnt 100"""
+rule map_h3n2:
+    input:
+        reads1=output_path + "H3N2/reads_1.fastq",
+        reads2=output_path + "H3N2/reads_2.fastq",
+        ref="/home/mahmadi/flu_seqs/reference/H3N2.fasta"
+    output:
+        bam=output_path + "h3n2_mapped_reads.bam"
+    conda:
+        "minimap"
+    shell:
+        """
+        minimap2 -ax sr {input.ref} {input.reads1} {input.reads2} | \
+        samtools view -bS - | samtools sort -o {output.bam}
+        samtools index {output.bam}
+        """
+
+rule call_h3n2_variants:
+    input:
+        bam=output_path + "h3n2_mapped_reads.bam",
+        ref="/home/mahmadi/flu_seqs/reference/H3N2.fasta"
+    output:
+        variants=output_path + "h3n2_variants.tsv",
+        depths=output_path + "h3n2_depths.tsv"
+    conda:
+        "freyja"
+    shell:
+        """
+        freyja variants {input.bam} --variants {output.variants} --depths {output.depths} --ref {input.ref}
+        """
+
+rule run_h3n2_demix:
+    input:
+        variants=output_path + "h3n2_variants.tsv",
+        depths=output_path + "h3n2_depths.tsv"
+    output:
+        output_path + "freyja_h3n2_demix.txt"
+    conda:
+        "freyja"
+    shell:
+        """
+        freyja demix {input.variants} {input.depths} --output {output} --pathogen H3N2 --autoadapt
+        """
+
+rule map_h1n1:
+    input:
+        reads1=output_path + "H1N1/reads_1.fastq",
+        reads2=output_path + "H1N1/reads_2.fastq",
+        ref="/home/mahmadi/flu_seqs/reference/H1N1.fasta"
+    output:
+        bam=output_path + "h1n1_mapped_reads.bam"
+    conda:
+        "minimap"
+    shell:
+        """
+        minimap2 -ax sr {input.ref} {input.reads1} {input.reads2} | \
+        samtools view -bS - | samtools sort -o {output.bam}
+        samtools index {output.bam}
+        """
+
+rule call_h1n1_variants:
+    input:
+        bam=output_path + "h1n1_mapped_reads.bam",
+        ref="/home/mahmadi/flu_seqs/reference/H1N1.fasta"
+    output:
+        variants=output_path + "h1n1_variants.tsv",
+        depths=output_path + "h1n1_depths.tsv"
+    conda:
+        "freyja"
+    shell:
+        """
+        freyja variants {input.bam} --variants {output.variants} --depths {output.depths} --ref {input.ref}
+        """
+
+rule run_h1n1_demix:
+    input:
+        variants=output_path + "h1n1_variants.tsv",
+        depths=output_path + "h1n1_depths.tsv"
+    output:
+        output_path + "freyja_h1n1_demix.txt"
+    conda:
+        "freyja"
+    shell:
+        """
+        freyja demix {input.variants} {input.depths} --output {output} --pathogen H1N1pdm --autoadapt
+        """
+
+rule mix_reads:
+    input:
+        h1n1_r1=output_path + "H1N1/reads_1.fastq",
+        h1n1_r2=output_path + "H1N1/reads_2.fastq",
+        h3n2_r1=output_path + "H3N2/reads_1.fastq",
+        h3n2_r2=output_path + "H3N2/reads_2.fastq"
+    output:
+        r1=output_path + "mixed_reads_1.fastq",
+        r2=output_path + "mixed_reads_2.fastq"
+    shell:
+        """
+        cat {input.h1n1_r1} {input.h3n2_r1} > {output.r1}
+        cat {input.h1n1_r2} {input.h3n2_r2} > {output.r2}
+        """
+rule map_reads:
+    input:
+        reads1=output_path + "mixed_reads_1.fastq",
+        reads2=output_path + "mixed_reads_2.fastq",
+        ref="/home/mahmadi/flu_seqs/reference/H1N1.fasta"
+    output:
+        bam=output_path + "mapped_reads.bam"
+    conda:
+        "minimap"  # replace with your actual conda environment name for minimap2
+    shell:
+        """
+        minimap2 -ax sr {input.ref} {input.reads1} {input.reads2} | \
+        samtools view -bS - | samtools sort -o {output.bam}
+        samtools index {output.bam}
+        """
+rule call_variants:
+    input:
+        bam=output_path + "mapped_reads.bam",
+        ref="/home/mahmadi/flu_seqs/reference/H1N1.fasta"
+    output:
+        variants=output_path + "variants.tsv",
+        depths=output_path + "depths.tsv"
+    conda:
+        "freyja"
+    shell:
+        """
+        freyja variants {input.bam} --variants {output.variants} --depths {output.depths} --ref {input.ref}
+        """
+rule run_demix:
+    input:
+        variants=output_path + "variants.tsv",
+        depths=output_path + "depths.tsv"
+    output:
+        output_path + "freyja_mixture_h3n2.txt"
+    conda:
+        "freyja"
+    shell:
+        """
+        freyja demix {input.variants} {input.depths} --output {output} --pathogen H3N2 --autoadapt
+        """
+        
+rule run_demix2:
+    input:
+        variants=output_path + "variants.tsv",
+        depths=output_path + "depths.tsv"
+    output:
+        output_path + "freyja_mixture_h1n1.txt"
+    conda:
+        "freyja"
+    shell:
+        """
+        freyja demix {input.variants} {input.depths} --output {output} --pathogen H1N1pdm --autoadapt
+        """
+        
